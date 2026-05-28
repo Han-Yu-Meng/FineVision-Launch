@@ -26,11 +26,14 @@ class Node:
                  source: str = None, 
                  version: str = "default",
                  parameters: Dict[str, Any] = None,
-                 remappings: Dict[str, str] = None):
+                 inputs: Dict[str, str] = None,
+                 outputs: Dict[str, str] = None):
         """
         :param package: 对应 C++ 的 package_name
         :param name: 对应 C++ 的类名
         :param source: 插件源，如果不填则使用 DefaultSource 上下文中的值
+        :param inputs: 输入端口映射 { "port_name": "topic_name" }
+        :param outputs: 输出端口映射 { "port_name": "topic_name" }
         """
         # 如果未指定 source，则使用上下文中的默认值
         self.source = source if source is not None else _CURRENT_DEFAULT_SOURCE
@@ -38,7 +41,8 @@ class Node:
         self.name = name
         self.version = version
         self.parameters = parameters or {}
-        self.remappings = remappings or {}
+        self.inputs = inputs or {}
+        self.outputs = outputs or {}
         
         # 生成唯一 ID
         unique_suffix = str(uuid.uuid4())[:4]
@@ -60,12 +64,12 @@ class LaunchDescription:
         for g in self.groups:
             all_nodes.extend(g.nodes)
 
-        # 建立全局 Topic 路由表
         topic_bus: Dict[str, str] = {}
         for node in all_nodes:
-            for port, topic in node.remappings.items():
-                if topic not in topic_bus:
-                    topic_bus[topic] = f"{node.id}/{port}"
+            for port, topic in node.outputs.items():
+                if topic in topic_bus:
+                    pass
+                topic_bus[topic] = f"{node.id}/{port}"
 
         fins_nodes = []
         for node in all_nodes:
@@ -81,11 +85,13 @@ class LaunchDescription:
                 "inputs": {}
             }
 
-            for port, topic in node.remappings.items():
-                if topic in topic_bus and topic_bus[topic] != f"{node.id}/{port}":
+            for port, topic in node.inputs.items():
+                if topic in topic_bus:
                     node_cfg["inputs"][port] = {
                         "connect": topic_bus[topic]
                     }
+                else:
+                    pass
             
             fins_nodes.append(node_cfg)
 
