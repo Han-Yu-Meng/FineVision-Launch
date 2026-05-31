@@ -13,6 +13,7 @@ class Agent:
         self.bin = os.path.expanduser("~/.fins/install/agent")
         self.proc = None
         self._is_running = False
+        self._enable_perf_monitor = False
         self.prefix = "[FineVision-Launch]"
         # 存储待加载的配置文件路径列表
         self.config_files = []
@@ -25,6 +26,10 @@ class Agent:
         else:
             print(f"{self.prefix} Error: Config file not found: {config_path}")
             sys.exit(1)
+
+    def enable_performance_monitor(self):
+        """启用性能监控"""
+        self._enable_perf_monitor = True
 
     def _check_plugin_status(self):
         try:
@@ -70,10 +75,13 @@ class Agent:
 
         # 1. 启动 Agent 进程
         print(f"{self.prefix} Starting FINS Agent [{self.name}] on port {self.port}...")
-        self.proc = subprocess.Popen([
-            self.bin, "--name", self.name, "--port", str(self.port), 
+        cmd = [
+            self.bin, "--name", self.name, "--port", str(self.port),
             "--ip", self.ip, "--load-all"
-        ])
+        ]
+        if self._enable_perf_monitor:
+            cmd.append("--perf")
+        self.proc = subprocess.Popen(cmd)
 
         # 2. 等待插件加载完成
         print(f"{self.prefix} Waiting for Agent to load plugins...")
