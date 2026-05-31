@@ -3,6 +3,7 @@ import os
 import time
 import requests
 import sys
+import socket
 
 class Agent:
     def __init__(self, name="agent_default", port=9090, ip="0.0.0.0"):
@@ -49,10 +50,22 @@ class Agent:
             print(f"{self.prefix} Error: Failed to apply {config_path}: {e}")
             sys.exit(1)
 
+    def _check_port_available(self, ip, port):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind((ip, port))
+                return True
+            except OSError:
+                return False
+
     def launch(self, ld: 'LaunchDescription'):
         """启动 Agent 并依次推送配置和数据流"""
         if not os.path.exists(self.bin):
             print(f"{self.prefix} Error: Agent executable not found at {self.bin}")
+            sys.exit(1)
+
+        if not self._check_port_available(self.ip, self.port):
+            print(f"{self.prefix} Warning: Port {self.port} is already in use. Please choose a different port or terminate the process using it.")
             sys.exit(1)
 
         # 1. 启动 Agent 进程
