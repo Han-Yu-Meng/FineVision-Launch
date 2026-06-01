@@ -14,6 +14,7 @@ class Agent:
         self.proc = None
         self._is_running = False
         self._enable_perf_monitor = False
+        self._log_level = "1"  # Default to INFO
         self.prefix = "[FineVision-Launch]"
         # 存储待加载的配置文件路径列表
         self.config_files = []
@@ -30,6 +31,23 @@ class Agent:
     def enable_performance_monitor(self):
         """启用性能监控"""
         self._enable_perf_monitor = True
+
+    def log_level(self, level: str):
+        """设置日志级别 (DEBUG, INFO, WARN, ERROR, OFF)"""
+        mapping = {
+            "DEBUG": "0",
+            "INFO": "1",
+            "WARN": "2",
+            "ERROR": "3",
+            "OFF": "4"
+        }
+        upper_level = level.upper()
+        if upper_level in mapping:
+            self._log_level = mapping[upper_level]
+            print(f"{self.prefix} Log level set to: {upper_level} ({self._log_level})")
+        else:
+            print(f"{self.prefix} Error: Invalid log level: {level}. Valid levels: DEBUG, INFO, WARN, ERROR, OFF")
+            sys.exit(1)
 
     def _check_plugin_status(self):
         try:
@@ -77,7 +95,7 @@ class Agent:
         print(f"{self.prefix} Starting FINS Agent [{self.name}] on port {self.port}...")
         cmd = [
             self.bin, "--name", self.name, "--port", str(self.port),
-            "--ip", self.ip, "--load-all"
+            "--ip", self.ip, "--load-all", "--log-level", self._log_level
         ]
         if self._enable_perf_monitor:
             cmd.append("--perf")
