@@ -4,6 +4,8 @@ import time
 import requests
 import sys
 import socket
+import atexit
+import signal
 
 class Agent:
     def __init__(self, name="agent_default", port=9090, ip="0.0.0.0"):
@@ -18,6 +20,17 @@ class Agent:
         self.prefix = "[FineVision-Launch]"
         # 存储待加载的配置文件路径列表
         self.config_files = []
+        
+        # 注册退出钩子，确保 Python 脚本退出时杀死 Agent 进程
+        atexit.register(self.stop)
+        
+        # 处理 SIGTERM 信号，确保 kill 命令等也能触发正常退出
+        # 注意：signal 只能在主线程注册
+        try:
+            signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
+        except ValueError:
+            # 如果不在主线程，忽略此设置
+            pass
 
     def add_config(self, config_path: str):
         """添加一个 YAML 配置文件路径"""
@@ -99,7 +112,12 @@ class Agent:
         ]
         if self._enable_perf_monitor:
             cmd.append("--perf")
-        self.proc = subprocess.Popen(cmd)
+        
+        # 使用进程组 (Process Group) 启动，确保能杀死所有子进程
+        if os.name == 'posix':
+            self.proc = subprocess.Popen(cmd, preexec_fn=os.setpgrp)
+        else:
+            self.proc = subprocess.Popen(cmd)
 
         # 2. 等待插件加载完成
         print(f"{self.prefix} Waiting for Agent to load plugins...")
@@ -161,13 +179,36 @@ class Agent:
             self.stop()
 
     def stop(self):
+        # 避免在 stop 过程中再次触发 atexit 导致的死循环（虽然 atexit 内部有处理，但显式控制更好）
+        if hasattr(self, '_stopping') and self._stopping:
+            return
+        self._stopping = True
+
         if self.proc:
             print(f"\n{self.prefix} Stopping Agent [{self.name}]...")
+            
+            # 如果是 POSIX 系统，尝试杀死整个进程组
+            if os.name == 'posix':
+                try:
+                    os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+                    # 给一点时间优雅退出
+                    time.sleep(0.5)
+                except Exception as e:
+                    print(f"{self.prefix} Warning: Failed to kill process group: {e}")
+            
+            # 常规终止
             self.proc.terminate()
             try:
-                self.proc.wait(timeout=5)
+                self.proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
+                # 强力杀死
+                if os.name == 'posix':
+                    try:
+                        os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
+                    except:
+                        pass
                 self.proc.kill()
+            
             self.proc = None
             self._is_running = False
 
