@@ -94,6 +94,19 @@ class Agent:
             except OSError:
                 return False
 
+    def _get_exit_message(self, exit_code):
+        """获取进程退出码的描述信息"""
+        if exit_code is None:
+            return "Unknown"
+        if exit_code < 0:
+            sig_num = -exit_code
+            try:
+                sig_name = signal.Signals(sig_num).name
+                return f"Crashed with signal {sig_num} ({sig_name})"
+            except (ValueError, AttributeError):
+                return f"Crashed with signal {sig_num}"
+        return f"Exited with code {exit_code}"
+
     def launch(self, ld: 'LaunchDescription'):
         """启动 Agent 并依次推送配置和数据流"""
         if not os.path.exists(self.bin):
@@ -134,8 +147,9 @@ class Agent:
                 sys.exit(1)
             
             time.sleep(0.5)
-            if self.proc.poll() is not None:
-                print(f"{self.prefix} Error: Agent process exited prematurely.")
+            exit_code = self.proc.poll()
+            if exit_code is not None:
+                print(f"{self.prefix} Error: Agent process exited prematurely. {self._get_exit_message(exit_code)}")
                 sys.exit(1)
         else:
             print(f"{self.prefix} Error: Timeout waiting for Agent.")
@@ -171,7 +185,10 @@ class Agent:
         try:
             while self._is_running:
                 time.sleep(1)
-                if self.proc and self.proc.poll() is not None:
+                exit_code = self.proc.poll()
+                if exit_code is not None:
+                    if exit_code != 0:
+                        print(f"{self.prefix} Error: Agent process died. {self._get_exit_message(exit_code)}")
                     break
         except KeyboardInterrupt:
             pass
@@ -190,9 +207,14 @@ class Agent:
             # 如果是 POSIX 系统，尝试杀死整个进程组
             if os.name == 'posix':
                 try:
-                    os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
-                    # 给一点时间优雅退出
-                    time.sleep(0.5)
+                    # 检查进程是否还在运行
+                    if self.proc.poll() is None:
+                        os.killpg(os.getpgid(self.proc.pid), signal.SIGTERM)
+                        # 给一点时间优雅退出
+                        time.sleep(0.5)
+                except (ProcessLookupError, OSError):
+                    # 进程或进程组已不存在，忽略
+                    pass
                 except Exception as e:
                     print(f"{self.prefix} Warning: Failed to kill process group: {e}")
             
