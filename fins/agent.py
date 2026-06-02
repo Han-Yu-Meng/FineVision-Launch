@@ -41,6 +41,26 @@ class Agent:
             print(f"{self.prefix} Error: Config file not found: {config_path}")
             sys.exit(1)
 
+    def add_config_dir(self, config_dir: str):
+        """添加一个目录下的所有 YAML 配置文件"""
+        if not os.path.isdir(config_dir):
+            print(f"{self.prefix} Error: Config directory not found: {config_dir}")
+            sys.exit(1)
+        
+        # 遍历目录，获取所有 .yaml 和 .yml 文件
+        files = sorted(os.listdir(config_dir))
+        added_any = False
+        for f in files:
+            if f.endswith((".yaml", ".yml")):
+                full_path = os.path.join(config_dir, f)
+                # 仅添加文件，排除子目录
+                if os.path.isfile(full_path):
+                    self.add_config(full_path)
+                    added_any = True
+        
+        if not added_any:
+            print(f"{self.prefix} Warning: No YAML files found in directory: {config_dir}")
+
     def enable_performance_monitor(self):
         """启用性能监控"""
         self._enable_perf_monitor = True
