@@ -109,6 +109,8 @@ class Agent:
     def _check_port_available(self, ip, port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
+                # 允许重用处于 TIME_WAIT 状态的端口
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 s.bind((ip, port))
                 return True
             except OSError:
