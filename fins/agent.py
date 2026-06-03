@@ -6,6 +6,7 @@ import sys
 import socket
 import atexit
 import signal
+import psutil
 
 class Agent:
     def __init__(self, name="agent_default", port=9090, ip="0.0.0.0"):
@@ -116,6 +117,53 @@ class Agent:
             except OSError:
                 return False
 
+    def _kill_process_on_port(self, port):
+        """查找并杀死占用指定端口的进程"""
+        found_processes = []
+        try:
+            # 遍历所有进程，查找占用端口的连接
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    connections = proc.connections(kind='inet')
+                    for conn in connections:
+                        if conn.laddr.port == port:
+                            found_processes.append(proc)
+                            break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            if not found_processes:
+                return False
+
+            for proc in found_processes:
+                pid = proc.info['pid']
+                name = proc.info['name']
+                print(f"{self.prefix} Found process {name} (PID: {pid}) using port {port}")
+                try:
+                    user_input = input(f"{self.prefix} Do you want to kill this process? (y/n): ").lower()
+                except EOFError:
+                    return False
+                
+                if user_input == 'y':
+                    try:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=3)
+                        except psutil.TimeoutExpired:
+                            proc.kill()
+                        print(f"{self.prefix} Process {pid} terminated.")
+                    except psutil.NoSuchProcess:
+                        print(f"{self.prefix} Process {pid} already terminated.")
+                    except psutil.AccessDenied:
+                        print(f"{self.prefix} Error: Access denied to kill process {pid}. You may need higher privileges.")
+                        return False
+                else:
+                    return False
+            return True
+        except Exception as e:
+            print(f"{self.prefix} Error while trying to kill process: {e}")
+        return False
+
     def _get_exit_message(self, exit_code):
         """获取进程退出码的描述信息"""
         if exit_code is None:
@@ -136,8 +184,14 @@ class Agent:
             sys.exit(1)
 
         if not self._check_port_available(self.ip, self.port):
-            print(f"{self.prefix} Warning: Port {self.port} is already in use. Please choose a different port or terminate the process using it.")
-            sys.exit(1)
+            print(f"{self.prefix} Warning: Port {self.port} is already in use.")
+            if self._kill_process_on_port(self.port):
+                # 再次检查端口是否可用
+                if not self._check_port_available(self.ip, self.port):
+                    print(f"{self.prefix} Error: Port {self.port} is still in use.")
+                    sys.exit(1)
+            else:
+                sys.exit(1)
 
         # 1. 启动 Agent 进程
         print(f"{self.prefix} Starting FINS Agent [{self.name}] on port {self.port}...")
