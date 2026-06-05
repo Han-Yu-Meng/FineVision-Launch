@@ -7,6 +7,7 @@ import socket
 import atexit
 import signal
 import psutil
+from fins.core import LaunchDescription
 
 class Agent:
     def __init__(self, name="agent_default", port=9090, ip="0.0.0.0"):
@@ -177,7 +178,8 @@ class Agent:
                 return f"Crashed with signal {sig_num}"
         return f"Exited with code {exit_code}"
 
-    def launch(self, ld: 'LaunchDescription'):
+    def launch(self, *groups: 'Group'):
+        ld = LaunchDescription(groups=list(groups))
         """启动 Agent 并依次推送配置和数据流"""
         if not os.path.exists(self.bin):
             print(f"{self.prefix} Error: Agent executable not found at {self.bin}")
