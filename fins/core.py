@@ -27,13 +27,17 @@ class Node:
                  version: str = "default",
                  parameters: Dict[str, Any] = None,
                  inputs: Dict[str, str] = None,
-                 outputs: Dict[str, str] = None):
+                 outputs: Dict[str, str] = None,
+                 servers: Dict[str, str] = None,
+                 clients: Dict[str, str] = None):
         """
         :param package: 对应 C++ 的 package_name
         :param name: 对应 C++ 的类名
         :param source: 插件源，如果不填则使用 DefaultSource 上下文中的值
         :param inputs: 输入端口映射 { "port_name": "topic_name" }
         :param outputs: 输出端口映射 { "port_name": "topic_name" }
+        :param servers: 服务端映射 { "server_name": "service_name" }
+        :param clients: 客户端映射 { "client_name": "service_name" }
         """
         # 如果未指定 source，则使用上下文中的默认值
         self.source = source if source is not None else _CURRENT_DEFAULT_SOURCE
@@ -43,6 +47,8 @@ class Node:
         self.parameters = parameters or {}
         self.inputs = inputs or {}
         self.outputs = outputs or {}
+        self.servers = servers or {}
+        self.clients = clients or {}
         
         # 生成唯一 ID
         unique_suffix = str(uuid.uuid4())[:4]
@@ -82,7 +88,13 @@ class LaunchDescription:
                 "parameters": [
                     {"name": k, "value": v} for k, v in node.parameters.items()
                 ],
-                "inputs": {}
+                "inputs": {},
+                "servers": [
+                    {"name": k, "topic": v} for k, v in node.servers.items()
+                ],
+                "clients": [
+                    {"name": k, "topic": v} for k, v in node.clients.items()
+                ]
             }
 
             for port, topic in node.inputs.items():
