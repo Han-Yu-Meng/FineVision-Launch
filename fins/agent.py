@@ -209,6 +209,8 @@ class Agent:
             self.proc = subprocess.Popen(cmd, preexec_fn=os.setpgrp)
         else:
             self.proc = subprocess.Popen(cmd)
+        
+        print(f"{self.prefix} Agent process started with PID: {self.proc.pid}")
 
         # 2. 等待插件加载完成
         print(f"{self.prefix} Waiting for Agent to load plugins...")
