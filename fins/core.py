@@ -1,9 +1,34 @@
 import json
 import uuid
+import yaml
 from typing import Dict, List, Any, Optional
 from contextlib import contextmanager
 
 _CURRENT_DEFAULT_SOURCE = "common"
+
+
+def override_yaml(yaml_content: str, overrides: Dict[str, Any]) -> str:
+    """
+    Apply dot-notation overrides to a YAML string and return the modified YAML.
+
+    Nested keys are navigated via ``.`` separator; intermediate dicts are
+    auto-created when a path segment does not already exist.
+
+    :param yaml_content: raw YAML string
+    :param overrides:    dict mapping dot-notation paths to new values,
+                         e.g. ``{"camera.width": 1920, "camera.height": 1080}``
+    :return:             modified YAML string
+    """
+    config = yaml.safe_load(yaml_content) or {}
+    for path, value in overrides.items():
+        keys = path.split(".")
+        target = config
+        for key in keys[:-1]:
+            if key not in target or not isinstance(target[key], dict):
+                target[key] = {}
+            target = target[key]
+        target[keys[-1]] = value
+    return yaml.dump(config, default_flow_style=False, allow_unicode=True)
 
 @contextmanager
 def DefaultSource(source_name: str):

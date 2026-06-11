@@ -7,7 +7,7 @@ import socket
 import atexit
 import signal
 import psutil
-from fins.core import LaunchDescription
+from fins.core import LaunchDescription, override_yaml
 
 class Agent:
     def __init__(self, name="agent_default", port=9090, ip="0.0.0.0"):
@@ -34,11 +34,20 @@ class Agent:
             # 如果不在主线程，忽略此设置
             pass
 
-    def add_config(self, config_path: str):
-        """添加一个 YAML 配置文件路径"""
+    def add_config(self, config_path: str, overrides: dict = None):
+        """
+        添加一个 YAML 配置文件路径，可选择性地覆盖其中的参数。
+
+        :param config_path: YAML 配置文件路径
+        :param overrides:   可选的参数字典，使用 dot-notation 路径覆盖 YAML 中的值，
+                            例如 ``{"camera.width": 1920, "camera.height": 1080}``
+        """
         if os.path.exists(config_path):
-            self.config_files.append(config_path)
-            print(f"{self.prefix} Added config: {config_path}")
+            self.config_files.append((config_path, overrides or {}))
+            msg = f"{self.prefix} Added config: {config_path}"
+            if overrides:
+                msg += f" (with {len(overrides)} override(s))"
+            print(msg)
         else:
             print(f"{self.prefix} Error: Config file not found: {config_path}")
             sys.exit(1)
@@ -93,17 +102,24 @@ class Agent:
             return None
         return None
 
-    def _apply_parameters(self, config_path: str):
-        """上传单个 YAML 文件内容"""
+    def _apply_parameters(self, config_path: str, overrides: dict = None):
+        """读取 YAML 文件，应用 overrides，上传到 Agent"""
+        overrides = overrides or {}
         try:
             with open(config_path, 'r') as f:
                 yaml_content = f.read()
-            
+
+            if overrides:
+                yaml_content = override_yaml(yaml_content, overrides)
+
             url = f"http://127.0.0.1:{self.port}/apply_parameters"
             payload = {"content": yaml_content}
             r = requests.post(url, json=payload, timeout=2)
             r.raise_for_status()
-            print(f"{self.prefix} Applied config: {os.path.basename(config_path)}")
+            msg = f"{self.prefix} Applied config: {os.path.basename(config_path)}"
+            if overrides:
+                msg += f" (with {len(overrides)} override(s))"
+            print(msg)
         except Exception as e:
             print(f"{self.prefix} Error: Failed to apply {config_path}: {e}")
             sys.exit(1)
@@ -239,8 +255,8 @@ class Agent:
         # 3. 依次应用所有添加的配置文件
         if self.config_files:
             print(f"{self.prefix} Applying {len(self.config_files)} configurations...")
-            for cfg in self.config_files:
-                self._apply_parameters(cfg)
+            for cfg, overrides in self.config_files:
+                self._apply_parameters(cfg, overrides)
 
         # 4. 推送 Dataflow 配置
         print(f"{self.prefix} Sending dataflow configuration...")
