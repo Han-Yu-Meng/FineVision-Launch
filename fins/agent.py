@@ -137,6 +137,8 @@ class Agent:
     def _kill_process_on_port(self, port):
         """查找并杀死占用指定端口的进程"""
         found_processes = []
+        access_denied_count = 0
+        
         try:
             # 遍历所有进程，查找占用端口的连接
             for proc in psutil.process_iter(['pid', 'name']):
@@ -146,16 +148,23 @@ class Agent:
                         if conn.laddr.port == port:
                             found_processes.append(proc)
                             break
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                except psutil.AccessDenied:
+                    # 记录因权限不足无法查看连接的进程数
+                    access_denied_count += 1
+                except psutil.NoSuchProcess:
                     continue
             
             if not found_processes:
+                if access_denied_count > 0:
+                    print(f"{self.prefix} Warning: Port {port} is occupied, but some processes could not be inspected due to insufficient privileges. Try running with sudo/root.")
+                else:
+                    print(f"{self.prefix} Info: Port {port} is occupied, but no active process owns it. It might be in TIME_WAIT or kernel cleanup state.")
                 return False
 
             for proc in found_processes:
                 pid = proc.info['pid']
                 name = proc.info['name']
-                print(f"{self.prefix} Found process {name} (PID: {pid}) using port {port}")
+                print(f"{self.prefix} Found process '{name}' (PID: {pid}) using port {port}")
                 try:
                     user_input = input(f"{self.prefix} Do you want to kill this process? (y/n): ").lower()
                 except EOFError:
@@ -168,9 +177,11 @@ class Agent:
                             proc.wait(timeout=3)
                         except psutil.TimeoutExpired:
                             proc.kill()
-                        print(f"{self.prefix} Process {pid} terminated.")
+                        print(f"{self.prefix} Process {pid} terminated. Waiting for port to release...")
+                        return True
                     except psutil.NoSuchProcess:
                         print(f"{self.prefix} Process {pid} already terminated.")
+                        return True
                     except psutil.AccessDenied:
                         print(f"{self.prefix} Error: Access denied to kill process {pid}. You may need higher privileges.")
                         return False
@@ -195,21 +206,37 @@ class Agent:
         return f"Exited with code {exit_code}"
 
     def launch(self, *groups: 'Group'):
-        ld = LaunchDescription(groups=list(groups))
         """启动 Agent 并依次推送配置和数据流"""
+        ld = LaunchDescription(groups=list(groups))
+        
         if not os.path.exists(self.bin):
             print(f"{self.prefix} Error: Agent executable not found at {self.bin}")
             sys.exit(1)
 
+        # 检查端口可用性
         if not self._check_port_available(self.ip, self.port):
             print(f"{self.prefix} Warning: Port {self.port} is already in use.")
-            if self._kill_process_on_port(self.port):
-                # 再次检查端口是否可用
-                if not self._check_port_available(self.ip, self.port):
-                    print(f"{self.prefix} Error: Port {self.port} is still in use.")
-                    sys.exit(1)
-            else:
+            
+            # 尝试识别并杀死占用该端口的进程
+            self._kill_process_on_port(self.port)
+            
+            # 循环探测等待，确保给系统内核清理 lingering socket（如 TIME_WAIT 状态）的时间
+            max_wait_time = 5.0  # 最大等待时间，单位：秒
+            wait_interval = 0.5  # 探测间隔，单位：秒
+            elapsed = 0.0
+            
+            print(f"{self.prefix} Checking/Waiting for port {self.port} to become available...")
+            while elapsed < max_wait_time:
+                if self._check_port_available(self.ip, self.port):
+                    break
+                time.sleep(wait_interval)
+                elapsed += wait_interval
+                
+            if not self._check_port_available(self.ip, self.port):
+                print(f"{self.prefix} Error: Port {self.port} is still in use after waiting {max_wait_time}s.")
                 sys.exit(1)
+            else:
+                print(f"{self.prefix} Port {self.port} is now available.")
 
         # 1. 启动 Agent 进程
         print(f"{self.prefix} Starting FINS Agent [{self.name}] on port {self.port}...")
@@ -292,7 +319,7 @@ class Agent:
             self.stop()
 
     def stop(self):
-        # 避免在 stop 过程中再次触发 atexit 导致的死循环（虽然 atexit 内部有处理，但显式控制更好）
+        # 避免在 stop 过程中再次触发 atexit 导致的死循环
         if hasattr(self, '_stopping') and self._stopping:
             return
         self._stopping = True
