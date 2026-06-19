@@ -26,6 +26,9 @@ class Agent:
         self.proc = None
         self._is_running = False
         self._enable_timeline_monitor = False
+        self._enable_perf_record = False
+        self._perf_output_file = "perf.data"
+        self._perf_proc = None
         self._debug_mode = False
         self._debug_full_bt = False
         self._log_level = "1"  # Default to INFO
@@ -111,6 +114,31 @@ class Agent:
         self._debug_full_bt = full_backtrace
         bt_type = "full" if full_backtrace else "normal"
         print(f"{self.prefix} Debug mode enabled - will launch with GDB ({bt_type} backtrace on crash)")
+
+    def enable_perf(self, output_file="perf.data"):
+        """
+        启用系统级 perf record 性能采样，与 Agent 进程并行运行。
+
+        perf record 会采集 Agent 进程的 CPU 性能计数器数据（调用栈、cache miss、
+        分支预测等），输出 perf.data 文件供后续 ``perf report`` 或 ``perf script`` 分析。
+
+        需要：
+        - 系统安装 perf 工具
+        - 足够的采样权限（建议以 root 运行或设置 perf_event_paranoid）
+
+        :param output_file: perf.data 输出路径，默认为当前目录下的 perf.data
+        """
+        # 检查 perf 是否可用
+        try:
+            subprocess.run(["perf", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            print(f"{self.prefix} Error: perf is not installed or not found in PATH.")
+            print(f"{self.prefix} Install it with: sudo apt install linux-tools-common linux-tools-generic")
+            sys.exit(1)
+
+        self._enable_perf_record = True
+        self._perf_output_file = output_file
+        print(f"{self.prefix} Perf record enabled - output will be saved to: {output_file}")
 
     def log_level(self, level: str):
         """设置日志级别 (DEBUG, INFO, WARN, ERROR, OFF)"""
@@ -379,6 +407,13 @@ class Agent:
         pid_label = "GDB PID" if self._debug_mode else "PID"
         print(f"{self.prefix} Agent process started with {pid_label}: {self.proc.pid}")
 
+        # 如果启用了 perf record，在 Agent 进程启动后立即开始采样
+        if self._enable_perf_record:
+            perf_cmd = ["perf", "record", "-p", str(self.proc.pid), "-o", self._perf_output_file]
+            print(f"{self.prefix} Starting perf record (PID: {self.proc.pid})...")
+            self._perf_proc = subprocess.Popen(perf_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"{self.prefix} Perf record started, output: {self._perf_output_file}")
+
         # 2. 等待插件加载完成
         print(f"{self.prefix} Waiting for Agent to load plugins...")
         timeout = 30
@@ -480,6 +515,17 @@ class Agent:
             
             self.proc = None
             self._is_running = False
+
+            # 停止 perf record
+            if hasattr(self, '_perf_proc') and self._perf_proc:
+                print(f"{self.prefix} Stopping perf record...")
+                self._perf_proc.terminate()
+                try:
+                    self._perf_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self._perf_proc.kill()
+                self._perf_proc = None
+                print(f"{self.prefix} Perf data saved to {self._perf_output_file}")
 
     def __enter__(self):
         return self
