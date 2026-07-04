@@ -1,6 +1,8 @@
 import json
 import uuid
 import yaml
+import inspect
+import os
 from typing import Dict, List, Any, Optional
 from contextlib import contextmanager
 
@@ -30,14 +32,91 @@ def override_yaml(yaml_content: str, overrides: Dict[str, Any]) -> str:
         target[keys[-1]] = value
     return yaml.dump(config, default_flow_style=False, allow_unicode=True)
 
+
+def _load_workspace_config():
+    """Load local_packages from ~/.fins/config.yaml, sorted by path length descending."""
+    config_path = os.path.expanduser('~/.fins/config.yaml')
+    if not os.path.exists(config_path):
+        return []
+    with open(config_path, 'r') as f:
+        cfg = yaml.safe_load(f)
+    packages = cfg.get('local_packages', []) if cfg else []
+    return sorted(packages, key=lambda x: len(x.get('path', '')), reverse=True)
+
+
+def get_workspace_paths() -> List[str]:
+    """
+    Return all registered workspace root paths from ~/.fins/config.yaml.
+
+    Used by Agent.launch() to inject --workspace arguments.
+    """
+    pkgs = _load_workspace_config()
+    return [pkg['path'] for pkg in pkgs if 'path' in pkg]
+
+
+def get_current_workspace_path() -> str:
+    """
+    Auto-detect the workspace path from the calling script's location.
+    Only returns the single workspace that contains the user's launch script,
+    NOT all registered workspaces.
+
+    Falls back to ~/.fins/install/ if no workspace matches.
+    """
+    pkgs = _load_workspace_config()
+    if not pkgs:
+        return os.path.expanduser('~/.fins/install')
+
+    for frame_info in inspect.stack():
+        frame_file = frame_info.filename
+        if '/fins/' in frame_file or 'site-packages' in frame_file:
+            continue
+        script_dir = os.path.dirname(os.path.abspath(frame_file))
+        for pkg in pkgs:
+            pkg_path = os.path.abspath(os.path.expanduser(pkg.get('path', '')))
+            if script_dir.startswith(pkg_path):
+                return pkg_path
+
+    return os.path.expanduser('~/.fins/install')
+
+
+def _detect_workspace_name() -> str:
+    """
+    Auto-detect the workspace name by walking up the call stack to find
+    the user's launch script, then matching its path against registered
+    workspaces in ~/.fins/config.yaml.
+    """
+    pkgs = _load_workspace_config()
+    if not pkgs:
+        return 'colcon_ws'
+
+    for frame_info in inspect.stack():
+        frame_file = frame_info.filename
+        # Skip files inside the fins launch package itself
+        if '/fins/' in frame_file or 'site-packages' in frame_file:
+            continue
+        script_dir = os.path.dirname(os.path.abspath(frame_file))
+        for pkg in pkgs:
+            pkg_path = os.path.abspath(os.path.expanduser(pkg.get('path', '')))
+            if script_dir.startswith(pkg_path):
+                return pkg.get('name', 'colcon_ws')
+
+    return 'colcon_ws'
+
+
 @contextmanager
-def DefaultSource(source_name: str):
+def DefaultSource(source_name: str = None):
     """
     上下文管理器，用于简化 Node 的编写。
     在此作用域下创建的 Node，如果不指定 source，则自动使用该值。
+
+    如果不传参数，则自动从调用脚本的路径推导所在的工作区名称。
+
+    :param source_name: 工作区名称；为 None 时自动检测
     """
     global _CURRENT_DEFAULT_SOURCE
     old_source = _CURRENT_DEFAULT_SOURCE
+    if source_name is None:
+        source_name = _detect_workspace_name()
     _CURRENT_DEFAULT_SOURCE = source_name
     try:
         yield

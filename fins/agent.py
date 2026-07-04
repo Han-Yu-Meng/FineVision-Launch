@@ -8,7 +8,7 @@ import atexit
 import signal
 import threading
 import psutil
-from fins.core import LaunchDescription, override_yaml
+from fins.core import LaunchDescription, override_yaml, get_current_workspace_path
 
 class Agent:
     def __init__(self, name="agent_default", port=None, ip="0.0.0.0"):
@@ -361,8 +361,10 @@ class Agent:
         # 1. 启动 Agent 进程
         cmd = [
             self.bin, "--name", self.name, "--port", str(self.port),
-            "--ip", self.ip, "--load-all", "--log-level", self._log_level
+            "--ip", self.ip, "--log-level", self._log_level
         ]
+        # Auto-inject only the workspace that contains this launch script
+        cmd.extend(["--workspace", get_current_workspace_path()])
         if self._enable_timeline_monitor:
             cmd.append("--perf")
 
