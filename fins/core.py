@@ -8,6 +8,11 @@ from contextlib import contextmanager
 
 _CURRENT_DEFAULT_SOURCE = "common"
 
+# Directory of the fins package itself, used to skip library frames
+# during stack inspection (instead of a fragile '/fins/' substring check
+# that also matches /home/fins/ paths).
+_FINS_PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 def override_yaml(yaml_content: str, overrides: Dict[str, Any]) -> str:
     """
@@ -68,9 +73,12 @@ def get_current_workspace_path() -> str:
 
     for frame_info in inspect.stack():
         frame_file = frame_info.filename
-        if '/fins/' in frame_file or 'site-packages' in frame_file:
+        if 'site-packages' in frame_file:
             continue
-        script_dir = os.path.dirname(os.path.abspath(frame_file))
+        abs_frame = os.path.abspath(frame_file)
+        if abs_frame.startswith(_FINS_PACKAGE_DIR):
+            continue
+        script_dir = os.path.dirname(abs_frame)
         for pkg in pkgs:
             pkg_path = os.path.abspath(os.path.expanduser(pkg.get('path', '')))
             if script_dir.startswith(pkg_path):
@@ -92,9 +100,12 @@ def _detect_workspace_name() -> str:
     for frame_info in inspect.stack():
         frame_file = frame_info.filename
         # Skip files inside the fins launch package itself
-        if '/fins/' in frame_file or 'site-packages' in frame_file:
+        if 'site-packages' in frame_file:
             continue
-        script_dir = os.path.dirname(os.path.abspath(frame_file))
+        abs_frame = os.path.abspath(frame_file)
+        if abs_frame.startswith(_FINS_PACKAGE_DIR):
+            continue
+        script_dir = os.path.dirname(abs_frame)
         for pkg in pkgs:
             pkg_path = os.path.abspath(os.path.expanduser(pkg.get('path', '')))
             if script_dir.startswith(pkg_path):
